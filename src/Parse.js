@@ -144,6 +144,20 @@ _html2canvas.Parse = function (images, options) {
     return bounds;
   }
 
+  function alterTextForTextOverflow(state, maxWidth, textOverflow, overflow, textDecoration, transform) {
+    if (overflow != 'visible' && textOverflow == 'ellipsis' && maxWidth > 0) {
+      do {
+        var node   = state.node;
+        var bounds = getTextBounds(state, state.node.nodeValue, textDecoration, true, transform);
+        state.node = node;  // compensate for getTextBounds altering the state
+        state.textOffset = 0;
+        if (bounds.width <= maxWidth || state.node.nodeValue.length == 1)
+          break;
+        state.node.nodeValue = state.node.nodeValue.substr(0, state.node.nodeValue.length - 2) + String.fromCharCode(8230);
+      } while (true);
+    }
+  }
+
   function textRangeBounds(text, textNode, textOffset) {
     var range = doc.createRange();
     range.setStart(textNode, textOffset);
@@ -153,55 +167,93 @@ _html2canvas.Parse = function (images, options) {
 
   function textWrapperBounds(oldTextNode, transform) {
     var parent = oldTextNode.parentNode,
-    wrapElement = doc.createElement('wrapper'),
-    backupText = oldTextNode.cloneNode(true);
+    wrapElement = doc.createElement('wrapper');
 
     wrapElement.appendChild(oldTextNode.cloneNode(true));
     parent.replaceChild(wrapElement, oldTextNode);
 
     var bounds = transform ? Util.OffsetBounds(wrapElement) : Util.Bounds(wrapElement);
-    parent.replaceChild(backupText, wrapElement);
+    parent.replaceChild(oldTextNode, wrapElement);
     return bounds;
   }
 
-  function renderText(el, textNode, stack) {
-    var ctx = stack.ctx,
-    color = getCSS(el, "color"),
-    textDecoration = getCSS(el, "textDecoration"),
-    textAlign = getCSS(el, "textAlign"),
-    metrics,
-    textList,
-    state = {
-      node: textNode,
-      textOffset: 0
-    };
+  function preserveTextNodes(element, textNode, callback) {
+      var a, childNode, originalTextNodes = [];
+      var newTextNode;
 
-    if (Util.trimText(textNode.nodeValue).length > 0) {
-      textNode.nodeValue = textTransform(textNode.nodeValue, getCSS(el, "textTransform"));
-      textAlign = textAlign.replace(["-webkit-auto"],["auto"]);
+      for (a=0; a<element.childNodes.length; a++) {
+        childNode = element.childNodes[a];
+        if (childNode.nodeType == Node.TEXT_NODE) {
+          originalTextNodes.push({
+            node     : childNode,
+            previous : childNode.previousSibling
+          });
 
-      textList = (!options.letterRendering && /^(left|right|justify|auto)$/.test(textAlign) && noLetterSpacing(getCSS(el, "letterSpacing"))) ?
-      textNode.nodeValue.split(/(\b| )/)
-      : textNode.nodeValue.split("");
+          var clone = childNode.cloneNode();
+          element.replaceChild(clone, childNode);
 
-      metrics = setTextVariables(ctx, el, textDecoration, color);
-
-      if (options.chinese) {
-        textList.forEach(function(word, index) {
-          if (/.*[\u4E00-\u9FA5].*$/.test(word)) {
-            word = word.split("");
-            word.unshift(index, 1);
-            textList.splice.apply(textList, word);
-          }
-        });
+          if (childNode === textNode) newTextNode = clone;
+        }
       }
 
-      textList.forEach(function(text, index) {
-        var bounds = getTextBounds(state, text, textDecoration, (index < textList.length - 1), stack.transform.matrix);
-        if (bounds) {
-          drawText(text, bounds.left, bounds.bottom, ctx);
-          renderTextDecoration(ctx, textDecoration, bounds, metrics, color);
+      try { callback(newTextNode) } finally {
+        // restore original text nodes
+        for (a=0; a<element.childNodes.length;) {
+          childNode = element.childNodes[a];
+          if (childNode.nodeType == Node.TEXT_NODE)
+            element.removeChild(childNode);
+          else
+            a++;  // the .removeChild call adjusts childNodes list
         }
+
+        originalTextNodes.forEach(function(entry) {
+          element.insertBefore(entry.node, entry.previous);
+        });
+      }
+  }
+
+  function renderText(el, textNode, stack) {
+    var ctx        = stack.ctx,
+    color          = getCSS(el, "color"),
+    textDecoration = getCSS(el, "textDecoration"),
+    textAlign      = getCSS(el, "textAlign"),
+    textOverflow   = getCSS(el, "textOverflow"),
+    overflow       = getCSS(el, "overflow"),
+    metrics,
+    textList;
+
+    if (Util.trimText(textNode.nodeValue).length > 0) {
+      preserveTextNodes(el, textNode, function(textNode) {
+        var state = { node: textNode, textOffset: 0 };
+
+        textNode.nodeValue = textTransform(textNode.nodeValue, getCSS(el, "textTransform"));
+        textAlign = textAlign.replace(["-webkit-auto"],["auto"]);
+        if (stack.clip)
+          alterTextForTextOverflow(state, stack.clip.width, textOverflow, overflow, textDecoration, stack.transform.matrix);
+
+        textList = (!options.letterRendering && /^(left|right|justify|auto)$/.test(textAlign) && noLetterSpacing(getCSS(el, "letterSpacing"))) ?
+        textNode.nodeValue.split(/(\b| )/)
+        : textNode.nodeValue.split("");
+
+        metrics = setTextVariables(ctx, el, textDecoration, color);
+
+        if (options.chinese) {
+          textList.forEach(function(word, index) {
+            if (/.*[\u4E00-\u9FA5].*$/.test(word)) {
+              word = word.split("");
+              word.unshift(index, 1);
+              textList.splice.apply(textList, word);
+            }
+          });
+        }
+
+        textList.forEach(function(text, index) {
+          var bounds = getTextBounds(state, text, textDecoration, (index < textList.length - 1), stack.transform.matrix);
+          if (bounds) {
+            drawText(text, bounds.left, bounds.bottom, ctx);
+            renderTextDecoration(ctx, textDecoration, bounds, metrics, color);
+          }
+        });
       });
     }
   }

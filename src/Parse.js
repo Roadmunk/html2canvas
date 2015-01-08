@@ -151,7 +151,8 @@ _html2canvas.Parse = function (images, options) {
         var bounds = getTextBounds(state, state.node.nodeValue, textDecoration, true, transform);
         state.node = node;  // compensate for getTextBounds altering the state
         state.textOffset = 0;
-        if (bounds.width <= maxWidth || state.node.nodeValue.length == 1)
+        // use a small fudge factor (the + 1) because the bounds.width tends to contain a fractional portion
+        if (bounds.width <= maxWidth + 1 || state.node.nodeValue.length == 1)
           break;
         state.node.nodeValue = state.node.nodeValue.substr(0, state.node.nodeValue.length - 2) + String.fromCharCode(8230);
       } while (true);

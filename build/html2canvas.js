@@ -2685,6 +2685,11 @@ _html2canvas.Util.Support = function (options, doc) {
     if (doc.createRange) {
       r = doc.createRange();
       if (r.getBoundingClientRect) {
+        // ColinRhodes: the `testElement` code below breaks in Chrome when zoom is not 100%
+        // Since we only support Chrome and the comment above says that this is for Opera,
+        //   disable this check
+        return true;
+        /*
         testElement = doc.createElement('boundtest');
         testElement.style.height = "123px";
         testElement.style.display = "block";
@@ -2698,6 +2703,7 @@ _html2canvas.Util.Support = function (options, doc) {
           support = true;
         }
         doc.body.removeChild(testElement);
+        */
       }
     }
 
